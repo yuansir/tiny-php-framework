@@ -1,0 +1,631 @@
+自己动手写PHP MVC框架
+
+来自：yuansir-web.com / yuansir@live.cn
+
+PHP的框架众多，对于哪个框架最好，哪个框架最烂，是否应该用框架，对于这些争论在论坛里面都有人争论，这里不做评价，
+个人觉得根据自己需求，选中最佳最适合自己MVC框架，并在开发中能够体现出敏捷开发的效果就OK了，作为一个PHPer要提高自己的对PHP和MVC的框架的认识，所以自己写一个MVC框架是很有必要的，
+即使不是很完善，但是自己动手写一个轻量简洁的PHP MVC框架起码对MVC的思想有一定的了解，而且经过自己后期的完善会渐渐形成一个自己熟悉的一个PHP框架。
+
+来写一个PHP MVC框架开发的简明教程，首先声明，教程里面的框架不是一个完善的框架，只是一种思路，当然每个人对MVC框架实现的方法肯定是有差异的，希望高手多提意见多指正，和我一样的菜鸟多讨论多交流，刚接触MVC的PHPer多学习。
+
+首先，我们在项目中建立如下目录和文件：
+
+app
+|-controller	存放控制器文件
+|-model		存放模型文件
+|-view		存放视图文件	
+|-lib		存放自定义类库
+|-config	存放配置文件
+|--config.php   系统配置文件
+|-system	系统核心目录
+|-index.php	入口文件
+
+新件的index.php为入口文件，我们这里采用单一入口，入口文件的内容很简单：
+
+<?php
+/**
+ * 应用入口文件
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+require dirname(__FILE__).'/system/app.php';
+require dirname(__FILE__).'/config/config.php';
+Application::run($CONFIG);
+
+入口文件主要做了2件事，第一引入系统的驱动类，第二是引入配置文件，然后运行run（）方法，传入配置作为参数，具体这2个文件是什么内容，我们接下来继续看。
+
+先看一下config/config.php文件，里面其实是一个$CONFIG变量，这个变量存放的全局的配置：
+
+<?php
+/**
+ * 系统配置文件
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+
+/*数据库配置*/
+$CONFIG['system']['db'] = array(
+    'db_host'           =>      'localhost',
+    'db_user'           =>      'root',
+    'db_password'       =>      '',
+    'db_database'       =>      'app',
+    'db_table_prefix'   =>      'app_',
+    'db_charset'        =>      'urf8',
+    'db_conn'           =>      '',             //数据库连接标识; pconn 为长久链接，默认为即时链接
+    
+);
+
+/*自定义类库配置*/
+$CONFIG['system']['lib'] = array(
+    'prefix'            =>      'my'   //自定义类库的文件前缀
+);
+
+$CONFIG['system']['route'] = array(
+    'default_controller'             =>      'home',  //系统默认控制器
+    'default_action'                 =>      'index',  //系统默认控制器
+    'url_type'                       =>      1          /*定义URL的形式 1 为普通模式    index.php?c=controller&a=action&id=2
+                                                         *              2 为PATHINFO   index.php/controller/action/id/2(暂时不实现)              
+                                                         */                                                                           
+);
+
+/*缓存配置*/
+$CONFIG['system']['cache'] = array(
+    'cache_dir'                 =>      'cache', //缓存路径，相对于根目录
+    'cache_prefix'              =>      'cache_',//缓存文件名前缀
+    'cache_time'                =>      1800,    //缓存时间默认1800秒
+    'cache_mode'                =>      2,       //mode 1 为serialize ，model 2为保存为可执行文件    
+);
+
+我这里有意识的定义$CONFIG['system']数组表示是系统的配置文件，当然你可以在里面定义$CONFIG['myconfig']为表示在定义的配置，以后在程序的控制器，模型，视图中来调用，都个很自由。
+具体配置值代表什么意思注视很清楚了，下面的如果程序中有详细注释的我就不解释啦，呵呵
+
+再来看一下system/app.php文件，主要是干嘛的：
+
+<?php
+/**
+ * 应用驱动类
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+define('SYSTEM_PATH', dirname(__FILE__));
+define('ROOT_PATH',  substr(SYSTEM_PATH, 0,-7));
+define('SYS_LIB_PATH', SYSTEM_PATH.'/lib');
+define('APP_LIB_PATH', ROOT_PATH.'/lib');
+define('SYS_CORE_PATH', SYSTEM_PATH.'/core');
+define('CONTROLLER_PATH', ROOT_PATH.'/controller');
+define('MODEL_PATH', ROOT_PATH.'/model');
+define('VIEW_PATH', ROOT_PATH.'/view');
+define('LOG_PATH', ROOT_PATH.'/error/');
+final class Application {
+        public static $_lib = null;
+        public static $_config = null;
+        public static function init() {
+                self::setAutoLibs();
+                require SYS_CORE_PATH.'/model.php';
+                require SYS_CORE_PATH.'/controller.php';
+                
+        }
+        /**
+         * 创建应用
+         * @access      public
+         * @param       array   $config
+         */
+        public static function run($config){
+                self::$_config = $config['system'];
+                self::init();
+                self::autoload();
+                self::$_lib['route']->setUrlType(self::$_config['route']['url_type']);
+                $url_array = self::$_lib['route']->getUrlArray();
+                self::routeToCm($url_array);
+        }
+        /**
+         * 自动加载类库
+         * @access      public
+         * @param       array   $_lib
+         */
+        public static function autoload(){
+                foreach (self::$_lib as $key => $value){
+                        require (self::$_lib[$key]);
+                        $lib = ucfirst($key);
+                        self::$_lib[$key] = new $lib;                      
+                }
+                //初始化cache
+                if(is_object(self::$_lib['cache'])){
+                        self::$_lib['cache']->init(
+                                ROOT_PATH.'/'.self::$_config['cache']['cache_dir'],
+                                self::$_config['cache']['cache_prefix'],
+                                self::$_config['cache']['cache_time'],
+                                self::$_config['cache']['cache_mode']
+                                );
+                }
+        }
+        /**
+         * 加载类库
+         * @access      public  
+         * @param       string  $class_name 类库名称
+         * @return      object
+         */
+        public static function newLib($class_name){
+                $app_lib = $sys_lib = '';
+                $app_lib = APP_LIB_PATH.'/'.self::$_config['lib']['prefix'].'_'.$class_name.'.php';
+                $sys_lib = SYS_LIB_PATH.'/lib_'.$class_name.'.php';
+                
+                if(file_exists($app_lib)){
+                        require ($app_lib);
+                        $class_name = ucfirst(self::$_config['lib']['prefix']).ucfirst($class_name);
+                        return new $class_name;
+                }else if(file_exists($sys_lib)){
+                        require ($sys_lib);
+                        return self::$_lib['$class_name'] = new $class_name;
+                }else{
+                        trigger_error('加载 '.$class_name.' 类库不存在');
+                }
+        }
+        /**
+         * 自动加载的类库
+         * @access      public 
+         */
+        public static function setAutoLibs(){
+                self::$_lib = array(
+                    'route'              =>      SYS_LIB_PATH.'/lib_route.php',
+                    'mysql'              =>      SYS_LIB_PATH.'/lib_mysql.php',
+                    'template'           =>      SYS_LIB_PATH.'/lib_template.php',
+                    'cache'           =>      SYS_LIB_PATH.'/lib_cache.php',
+                    'thumbnail'           =>      SYS_LIB_PATH.'/lib_thumbnail.php'
+                );      
+        }
+        /**
+         * 根据URL分发到Controller和Model
+         * @access      public 
+         * @param       array   $url_array     
+         */
+        public static function routeToCm($url_array = array()){
+                $app = '';
+                $controller = '';
+                $action = '';
+                $model = '';
+                $params = '';
+                
+                if(isset($url_array['app'])){
+                        $app = $url_array['app'];
+                }
+                
+                if(isset($url_array['controller'])){
+                        $controller = $model = $url_array['controller'];
+                        if($app){
+                                $controller_file = CONTROLLER_PATH.'/'.$app.'/'.$controller.'Controller.php';
+                                $model_file = MODEL_PATH.'/'.$app.'/'.$model.'Model.php';
+                        }else{
+                                $controller_file = CONTROLLER_PATH.'/'.$controller.'Controller.php';
+                                $model_file = MODEL_PATH.'/'.$model.'Model.php';
+                        }
+                }else{
+                        $controller = $model = self::$_config['route']['default_controller'];
+                        if($app){
+                                $controller_file = CONTROLLER_PATH.'/'.$app.'/'.self::$_config['route']['default_controller'].'Controller.php';
+                                $model_file = MODEL_PATH.'/'.$app.'/'.self::$_config['route']['default_controller'].'Model.php';
+                        }else{
+                                $controller_file = CONTROLLER_PATH.'/'.self::$_config['route']['default_controller'].'Controller.php';
+                                 $model_file = MODEL_PATH.'/'.self::$_config['route']['default_controller'].'Model.php';
+                        }
+                }
+                if(isset($url_array['action'])){
+                        $action = $url_array['action'];
+                }else{
+                        $action = self::$_config['route']['default_action'];
+                }
+                
+                if(isset($url_array['params'])){
+                        $params = $url_array['params'];
+                }
+                if(file_exists($controller_file)){
+                       if (file_exists($model_file)) {
+                                require $model_file;
+                        }
+                        require $controller_file;
+                        $controller = $controller.'Controller';
+                        $controller = new $controller;
+                        if($action){
+                                if(method_exists($controller, $action)){
+                                        isset($params) ? $controller ->$action($params) : $controller ->$action();
+                                }else{
+                                        die('控制器方法不存在');
+                                }
+                        }else{
+                                die('控制器方法不存在');
+                        }
+                }else{
+                        die('控制器不存在');
+                }
+        }
+
+}
+
+我叫它框架驱动类，也许不合适，但是我是这样理解的，它用来启动这个框架，做好一些初始化的工作，下面我来详细分析一下每个方法的功能：
+1.首先时定义了一些常量，很明了，不解释了
+2.setAutoLibs 这个方法其实就是设定那些是系统启动时自动加载的类库，类库文件都存放在SYS_LIB_PATH下面，以lib_开头的，当然这里你可以根据自己的规则来命名
+3.autoload 这个方法就是用来引入你要自动加载的类，然后来实例化，用$_lib数组来保存类的实例，比如$lib['route']是system/lib/lib_route.php中lib_route类的实例
+4.newLib 这个方法是用来加载你自定义的类的，自定义类存放在根目录下的lib中，但是自定义的类的文件前缀是你自己定义的，看系统配置文件里面有，我定义的是my，这样我就可以在lib
+	目录下新建一个自定义的类了，比如 my_test.php 
+	<?php
+	class MyTest {
+        	function __construct() {
+       	              echo "my lib test";
+        	}
+	}
+为什么类名这样命名，看下newLib方法的实现就知道，其实这些你完全可以定义自己的规则，这个方法会首先去着lib下面有没有这个类，如果有就会引入实例化，如果没有就去找系统目录下面的类，有就实例化
+5.init 就是一个初始化的方法，里面其实就是加载自动加载的类，以及引入核心控制器和核心模型，这个2个核心文件过会我们再来分析
+6.run 方法就是启动这个框架的了，里面的最后2步很重要，就是获取URL然后拆分成一个数组的形似，然后由routeToCm来分发到Controller和Model
+7.routeToCm 很重要，根据URL分发到Controller和Model，这个我们过会来说
+
+在run方法中
+                self::$_lib['route']->setUrlType(self::$_config['route']['url_type']); //设置url的类型
+                $url_array = self::$_lib['route']->getUrlArray();                      //将url转发成数组
+好吧，我们来看下route的系统类到底做了说明
+
+<?php
+/**
+ * URL处理类
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+final class Route{
+        public $url_query;
+        public $url_type;
+        public $route_url = array();
+
+
+        public function __construct() {
+                $this->url_query = parse_url($_SERVER['REQUEST_URI']);      
+        }
+        /**
+         * 设置URL类型
+         * @access      public
+         */
+        public function setUrlType($url_type = 2){
+                if($url_type > 0 && $url_type <3){
+                        $this->url_type = $url_type;
+                }else{
+                        trigger_error("指定的URL模式不存在！");
+                }
+        }
+
+        /**
+         * 获取数组形式的URL  
+         * @access      public
+         */
+        public function getUrlArray(){
+                $this->makeUrl();
+                return $this->route_url;
+        }
+        /**
+         * @access      public
+         */
+        public function makeUrl(){
+                switch ($this->url_type){
+                        case 1:
+                                $this->querytToArray();
+                                break;
+                        case 2:
+                                $this->pathinfoToArray();
+                                break;
+                }
+        }
+        /**
+         * 将query形式的URL转化成数组
+         * @access      public
+         */
+        public function querytToArray(){
+                $arr = !empty ($this->url_query['query']) ?explode('&', $this->url_query['query']) :array();
+                $array = $tmp = array();
+                if (count($arr) > 0) {
+                        foreach ($arr as $item) {
+                                $tmp = explode('=', $item);
+                                $array[$tmp[0]] = $tmp[1];
+                        }
+                        if (isset($array['app'])) {
+                                $this->route_url['app'] = $array['app'];
+                                unset($array['app']);
+                        } 
+                        if (isset($array['controller'])) {
+                                $this->route_url['controller'] = $array['controller'];
+                                unset($array['controller']);
+                        } 
+                        if (isset($array['action'])) {
+                                $this->route_url['action'] = $array['action'];
+                                unset($array['action']);
+                        }
+                        if(count($array) > 0){
+                                $this->route_url['params'] = $array;
+                        }
+                }else{
+                        $this->route_url = array();
+                }   
+        }
+        /**
+         * 将PATH_INFO的URL形式转化为数组
+         * @access      public
+         */
+        public function pathinfoToArray(){
+                
+        }
+}
+
+
+注意querytToArray方法，将将query形式的URL转化成数组，比如原来是localhost/myapp/index.php/app=admin&controller=index&action=edit&id=9&fid=10 这样的url就会被转发成如下的数组
+array(
+	'app'		=>'admin',
+	'controller'	=>'index',
+	'action'	=>'edit',
+	'id'		=>array(
+				'id'	=>9,
+				'fid'	=>10
+			)
+)
+这下再耐心来看下我写的笨拙的routeToCm，来通过数组参数来分发到控制器，找到控制器以后还要引用相应的模型，然后就实例化控制器和模型，呵呵，貌似有点成型了。
+
+
+下面就要开始实现 控制器-模型-视图了
+我们的思路是这样的，建立一个核心模型和核心控制器，在以后自己的模型和控制器中来继承核心模型和控制器，核心模型和控制器中主要可以是一些通用的方法和必须的组建的加载，下面我们先来写核心控制器，
+新建system/core/controller.php 
+<?php
+/**
+ * 核心控制器
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+class Controller{
+        
+        public function __construct() {
+               // header('Content-type:text/html;chartset=utf-8');
+        }
+        /**
+         * 实例化模型
+         * @access      final   protected
+         * @param       string  $model  模型名称
+         */
+        final protected function model($model) {
+                if (empty($model)) {
+                        trigger_error('不能实例化空模型');
+                }
+                $model_name = $model . 'Model';
+                return new $model_name;
+        }
+        /**
+         * 加载类库
+         * @param string $lib   类库名称
+         * @param Bool  $my     如果FALSE默认加载系统自动加载的类库，如果为TRUE则加载非自动加载类库
+         * @return object 
+         */
+        final protected function load($lib,$auto = TRUE){
+                if(empty($lib)){
+                        trigger_error('加载类库名不能为空');
+                }elseif($auto === TRUE){
+                        return Application::$_lib[$lib]; 
+                }elseif($auto === FALSE){
+                        return  Application::newLib($lib);
+                }
+        }
+        /**
+         * 加载系统配置,默认为系统配置 $CONFIG['system'][$config]
+         * @access      final   protected
+         * @param       string  $config 配置名  
+         */
+        final   protected function config($config){
+                return Application::$_config[$config];
+        }
+        /**
+         * 加载模板文件
+         * @access      final   protect
+         * @param       string  $path   模板路径
+         * @return      string  模板字符串
+         */
+        final protected function showTemplate($path,$data = array()){
+                $template =  $this->load('template');
+                $template->init($path,$data);
+                $template->outPut();
+        }
+}
+
+注释都写的很清楚了吧，其实很简单，这里的加载模板的方法中load了一个系统自动加载的模板类，这个类我们在建立视图的时候再来讲，然后我们再来建核心模型的文件
+system/core/model.php
+
+<?php
+/**
+ * 核心模型类
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+class Model {
+        protected $db = null;
+        
+        final public function __construct() {
+                header('Content-type:text/html;chartset=utf-8');
+                $this->db = $this->load('mysql'); 
+                $config_db = $this->config('db');
+                $this->db->init(
+                        $config_db['db_host'],
+                        $config_db['db_user'],
+                        $config_db['db_password'],
+                        $config_db['db_database'],
+                        $config_db['db_conn'],
+                        $config_db['db_charset']
+                        );                                            //初始话数据库类
+        }
+        /**
+         * 根据表前缀获取表名
+         * @access      final   protected
+         * @param       string  $table_name    表名
+         */
+        final protected function table($table_name){
+                $config_db = $this->config('db');
+                return $config_db['db_table_prefix'].$table_name;
+        }
+        /**
+         * 加载类库
+         * @param string $lib   类库名称
+         * @param Bool  $my     如果FALSE默认加载系统自动加载的类库，如果为TRUE则加载自定义类库
+         * @return type 
+         */
+        final protected function load($lib,$my = FALSE){
+                if(empty($lib)){
+                        trigger_error('加载类库名不能为空');
+                }elseif($my === FALSE){
+                        return Application::$_lib[$lib]; 
+                }elseif($my === TRUE){
+                        return  Application::newLib($lib);
+                }
+        }
+        /**
+         * 加载系统配置,默认为系统配置 $CONFIG['system'][$config]
+         * @access      final   protected
+         * @param       string  $config 配置名  
+         */
+        final   protected function config($config=''){
+                return Application::$_config[$config];
+        } 
+}
+
+因为模型基本是处理数据库的相关内容，所以我们加载了mysql类，这个mysql类就不在这里写了，你可以自己根据习惯写自己的mysql的操作类，如果你想支持其他的数据库，完全可以自己灵活添加。
+
+核心模型控制器已经有了，其实里面还可以添加其他你觉得必要的全局函数，这样我们开始新建一个自己的控制器和模型，来实例运用一下
+新建controller/testController.php
+
+<?php
+/**
+ * 测试控制器
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+class testController extends Controller {
+        
+        public function __construct() {
+                parent::__construct();
+        }
+
+        public function index() {
+                echo "test";
+        }
+        
+        public function testDb() {
+                $modTest = $this->model('test');        //示例化test模型        
+                $databases = $modTest->testDatebases(); //调用test模型中 testDatebases()方法
+                var_dump($databases);
+        }
+}
+
+testController 继承我们的核心控制器，其实在以后的每个控制器中都要继承的，现在我们通过浏览器访问 http://localhost/myapp/index.php?controller=test ,哈哈，可以输出 test 字符串了
+然后我们再新建一个模型model/testModel.php
+
+<?php
+/**
+ * 测试模型
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+class testModel extends Model{
+    
+        function testDatabases(){
+                $this->db->show_databases();    
+        }
+}
+
+其实就是定义了一个获取所有的数据库的方法，打开浏览器访问 http://localhost/myapp/index.php?controller=test&action=testDb，不管你信不信，反正我的浏览器是输出了所有的数据库了
+
+现在就差视图了，其实在核心控制器的controller.php文件中已经有了一个showTemplate方法，其实就是实现了加载模板类，$data就是我们要传递给模板的变量，然后输出模板
+        /**
+         * 加载模板文件
+         * @access      final   protect
+         * @param       string  $path   模板路径
+         * @param       array   $data   模板变量
+         * @return      string  模板字符串
+         */
+        final protected function showTemplate($path,$data = array()){
+                $template =  $this->load('template');
+                $template->init($path,$data);
+                $template->outPut();
+        }
+
+下面我们来看一下template类
+
+<?php
+/**
+ * 模板类
+ * @copyright   Copyright(c) 2011
+ * @author      yuansir <yuansir@live.cn/yuansir-web.com>
+ * @version     1.0
+ */
+final class Template {
+        public $template_name = null;
+        public $data = array();
+        public $out_put = null;
+        
+        public function init($template_name,$data = array()) {
+                $this->template_name = $template_name;
+                $this->data = $data;
+                $this->fetch();
+        }
+        /**
+         * 加载模板文件
+         * @access      public
+         * @param       string  $file
+         */
+        public function fetch() {
+                $view_file = VIEW_PATH . '/' . $this->template_name . '.php';
+                if (file_exists($view_file)) {
+                        extract($this->data);
+                        ob_start();
+                        include $view_file;
+                        $content = ob_get_contents();
+                        ob_end_clean();
+                        $this->out_put =  $content;
+                } else {
+                        trigger_error('加载 ' . $view_file . ' 模板不存在');
+                }
+        }
+        /**
+         * 输出模板
+         * @access      public  
+         * @return      string
+         */
+        public function outPut(){
+                echo $this->out_put;
+        }
+是不是简单，就是引入你的静态模版文件，放在缓冲区，然后输出，其实如果你想静态化某个模版，那个这个放在缓冲区的$this->out_put就有用了,你可以在里面添加一个静态化的方法。
+好了，现在我们来在新建一个视图文件 view/test.php
+<html>
+  <body>
+    这是<?php echo $test; ？>，呵呵
+  </body>
+<html>
+然后修改一些我们的testController.php中的index()
+        public function index() {
+                $data['test'] = "yuansir-web.com";
+                $this->showTemplate('test', $data);
+        }
+再来浏览 http://localhost/myapp/index.php?controller=test ,可以输出 “这是 yuansir-web.com，呵呵”，那么显然我们的视图也完成了。
+
+这样我们的自己写PHP的MVC的框架就完成了，再补充一下，有人可能疑惑如果我是想建立前台后台的，单一入口怎么办呢，其实你要是从头就看我的这个教程，看下代码就会发现，其实只要在 controller目录下新建
+一个admin目录就可以在里面写控制器了，比如controller/admin/testController.php 模板引用也是同样的道理，建立 view/admin/test.php ,然后模板加上路径就可以了，$this->showTemplate('admin/test', $data);
+是不是很简单，很灵活。
+
+好了，这样我们《自己动手写PHP MVC框架》的教程就结束了，你可以模仿自己写一个，也可以根据自己的思路来写一个，我教程中的可以自己扩增成一个完善的框架，再次申明一下，教程中的代码不完善，没有做过任何基准测试，效率神马的不考虑，便捷性神马的看个人，呵呵
+                  
+
+
+
+
+
+
+
+
+
+
